@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Smart Parking System</title>
+<style>
+:root{--bg:#121212;--card:#1e1e1e;--line:#33384a;--text:#e8eaf0;--mute:#9aa1b5;--blue:#3b82f6;--green:#10b981;--red:#ef4444}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;display:grid;place-items:start center;padding:24px 14px;background:var(--bg);color:var(--text);font:16px/1.45 system-ui,Segoe UI,Roboto,sans-serif}
+main{width:100%;max-width:460px;background:var(--card);border-radius:14px;padding:22px}
+h1,h2{margin:0 0 4px;color:var(--blue);text-align:center}
+h3{margin:0 0 8px;color:var(--blue);font-size:1rem}
+.sub{color:var(--mute);text-align:center;margin:0 0 16px;font-size:.9rem}
+button{width:100%;padding:11px;margin-top:8px;border:0;border-radius:8px;background:var(--blue);color:#fff;font:inherit;font-weight:600;cursor:pointer}
+button.alt{background:#374151}button.ghost{background:none;border:1px solid var(--line);color:var(--mute)}
+button.red{background:var(--red)}button.green{background:var(--green)}
+button:disabled{opacity:.45;cursor:not-allowed}
+button:focus-visible,input:focus-visible{outline:2px solid #93c5fd;outline-offset:2px}
+label{display:block;margin:10px 0 3px;font-size:.88rem;color:var(--mute)}
+input{width:100%;padding:10px;border-radius:8px;border:1px solid var(--line);background:#262626;color:var(--text);font:inherit}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.bay{border:2px solid var(--line);border-radius:10px;padding:12px;text-align:center}
+.bay.free{border-color:var(--green)}.bay.full{border-color:var(--red)}
+.tag{display:inline-block;font-size:.75rem;font-weight:700;padding:2px 8px;border-radius:5px}
+.free .tag{background:#064e3b;color:#34d399}.full .tag{background:#7f1d1d;color:#fca5a5}
+.box{border:1px solid var(--line);border-radius:10px;padding:14px;margin-top:14px}
+.err{color:#fca5a5;min-height:1.2em;margin:8px 0 0;font-size:.9rem}
+.big{font-size:1.8rem;font-weight:700;text-align:center;color:#60a5fa}
+table{width:100%;border-collapse:collapse;font-size:.82rem}th,td{text-align:left;padding:5px 4px;border-bottom:1px solid var(--line)}th{color:var(--blue)}
+.scroll{overflow-x:auto}.row{display:flex;gap:8px;align-items:center}.row button{margin-top:0}
+.hide{display:none}
+@media (prefers-reduced-motion:no-preference){button{transition:filter .15s}button:hover:not(:disabled){filter:brightness(1.1)}}
+</style>
+</head>
+<body>
+<main>
+
+<section id="menu">
+  <h1>Smart Parking System</h1>
+  <p class="sub">Select your access mode to continue</p>
+  <button onclick="show('cust')">Continue as Customer</button>
+  <button class="alt" onclick="show('login')">Continue as Management</button>
+</section>
+
+<section id="cust" class="hide">
+  <h2>Live Slot Map</h2>
+  <p class="sub" id="rateInfo">Real-time slot availability</p>
+  <div class="grid" id="bays"></div>
+  <div class="box hide" id="form">
+    <h3>Book Bay <span id="fBay"></span></h3>
+    <label for="fName">Full name</label><input id="fName" autocomplete="name">
+    <label for="fEmail">Email (your PIN is sent here)</label><input id="fEmail" type="email" autocomplete="email">
+    <label for="fPhone">Phone number</label><input id="fPhone" type="tel" autocomplete="tel">
+    <label for="fPlate">Number plate</label><input id="fPlate">
+    <p class="err" id="fErr" role="alert"></p>
+    <button id="fGo" onclick="book()">Book and email my PIN</button>
+    <button class="ghost" onclick="hideForm()">Cancel</button>
+  </div>
+  <div class="box hide" id="done">
+    <h3>Reservation successful</h3>
+    <p id="doneTxt" style="margin:0"></p>
+    <div class="big" id="meter"></div>
+    <p class="sub" id="fee"></p>
+    <button class="red" id="cancelBtn" onclick="cancelBooking()">Cancel booking</button>
+  </div>
+  <button class="ghost" onclick="show('menu')">← Back to Main Menu</button>
+</section>
+
+<section id="login" class="hide">
+  <h2>Management Login</h2>
+  <p class="sub">Enter administrative credentials</p>
+  <label for="u">Username</label><input id="u" autocomplete="username">
+  <label for="p">Password</label><input id="p" type="password" autocomplete="current-password">
+  <p class="err" id="lErr" role="alert"></p>
+  <button onclick="login()">Login</button>
+  <button class="ghost" onclick="show('menu')">← Back</button>
+</section>
+
+<section id="adm" class="hide">
+  <h2>Management Dashboard</h2>
+  <p class="sub">Real-time system controls and analytics</p>
+  <div class="box"><h3>Booking system override</h3>
+    <p style="margin:0">Status: <b id="aStatus"></b></p>
+    <button id="aToggle" onclick="toggleOpen()"></button></div>
+  <div class="box"><h3>Boom gates</h3>
+    <div class="row"><button class="green" onclick="openGate('entry')">Open entry gate</button><button class="green" onclick="openGate('exit')">Open exit gate</button></div>
+    <p class="sub" id="gMsg"></p></div>
+  <div class="box"><h3>Rate and revenue</h3>
+    <div class="row"><label for="rate" style="margin:0;flex:1">Hourly rate (R)</label>
+    <input id="rate" type="number" min="1" style="width:90px"><button style="width:auto;padding:10px 14px" onclick="setRate()">Save</button></div>
+    <p class="sub" style="margin-top:10px" id="rev"></p></div>
+  <div class="box"><div class="row"><h3 style="flex:1;margin:0">Bookings</h3>
+    <button class="alt" style="width:auto;padding:8px 12px" onclick="exportCsv()">Export CSV</button></div>
+    <div class="scroll"><table><thead><tr><th>Bay</th><th>Name</th><th>Email</th><th>Plate</th><th>Status</th><th>Fee</th></tr></thead><tbody id="rows"></tbody></table></div></div>
+  <button class="ghost" onclick="logout()">Logout</button>
+</section>
+
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const api = async (url, opt = {}, token) => {
+  const r = await fetch(url, { ...opt, headers: { 'content-type': 'application/json', ...(token ? { 'x-token': token } : {}) } });
+  const d = r.headers.get('content-type')?.includes('json') ? await r.json() : await r.text();
+  if (!r.ok) throw new Error(d.error || 'Request failed');
+  return d;
+};
+const post = (u, b, t) => api(u, { method: 'POST', body: JSON.stringify(b) }, t);
+const money = n => 'R' + (+n).toFixed(2);
+let timer, tok = sessionStorage.getItem('tok'), chosen = null, myBooking = JSON.parse(localStorage.getItem('booking') || 'null');
+
+function show(id) {
+  ['menu', 'cust', 'login', 'adm'].forEach(s => $(s).classList.toggle('hide', s !== id));
+  clearInterval(timer);
+  if (id === 'cust') { loadBays(); showBooking(); timer = setInterval(() => { loadBays(); showBooking(); }, 3000); }
+  if (id === 'adm') { loadAdmin(); timer = setInterval(loadAdmin, 5000); }
+}
+
+// ----- customer -----
+async function loadBays() {
+  try {
+    const d = await api('/api/bays');
+    $('rateInfo').textContent = d.open ? `Real-time availability · R${d.rate}/hour` : 'Booking is currently closed by management';
+    $('bays').innerHTML = d.bays.map(b => `<div class="bay ${b.free ? 'free' : 'full'}"><b>Bay ${b.id}</b><br>
+      <span class="tag">${b.free ? 'GREEN (Open)' : 'RED (Full)'}</span>
+      <button ${b.free && d.open && !myBooking ? '' : 'disabled'} onclick="pick(${b.id})">${b.free ? 'Book ahead' : 'Occupied'}</button></div>`).join('');
+  } catch (e) { $('rateInfo').textContent = 'Cannot reach the server'; }
+}
+function pick(id) { chosen = id; $('fBay').textContent = id; $('fErr').textContent = ''; $('form').classList.remove('hide'); $('fName').focus(); }
+function hideForm() { $('form').classList.add('hide'); }
+async function book() {
+  $('fErr').textContent = ''; $('fGo').disabled = true; $('fGo').textContent = 'Sending…';
+  try {
+    const d = await post('/api/book', { bay: chosen, name: $('fName').value, email: $('fEmail').value, phone: $('fPhone').value, plate: $('fPlate').value });
+    myBooking = { id: d.id, token: d.token, bay: d.bay, email: d.email, hold: d.holdMinutes };
+    localStorage.setItem('booking', JSON.stringify(myBooking));
+    hideForm(); showBooking(); loadBays();
+  } catch (e) { $('fErr').textContent = e.message; }
+  $('fGo').disabled = false; $('fGo').textContent = 'Book and email my PIN';
+}
+async function showBooking() {
+  if (!myBooking) return $('done').classList.add('hide');
+  try {
+    const s = await api(`/api/booking/${myBooking.id}?token=${myBooking.token}`);
+    if (['cancelled', 'expired', 'done'].includes(s.status)) {
+      if (s.status === 'done') alert('Thank you for parking. Total: ' + money(s.fee));
+      myBooking = null; localStorage.removeItem('booking'); $('done').classList.add('hide'); return loadBays();
+    }
+    $('done').classList.remove('hide');
+    if (s.status === 'active') {
+      $('doneTxt').textContent = `Bay ${s.bay} is reserved. Your 4-digit PIN was emailed to ${myBooking.email}. Enter it on the entrance keypad and press #.`;
+      const mins = Math.max(0, Math.ceil((s.expiresAt - Date.now()) / 6e4));
+      $('meter').textContent = ''; $('fee').textContent = `PIN valid for about ${mins} more minute(s).`; $('cancelBtn').disabled = false;
+    } else {
+      $('doneTxt').textContent = `Bay ${s.bay} — parking in progress. To leave, enter the same PIN on the keypad and press #.`;
+      const t = Math.floor((Date.now() - s.enteredAt) / 1000);
+      $('meter').textContent = `${String(Math.floor(t / 3600)).padStart(2, '0')}h ${String(Math.floor(t % 3600 / 60)).padStart(2, '0')}m ${String(t % 60).padStart(2, '0')}s`;
+      $('fee').textContent = 'Est. total: ' + money(s.fee); $('cancelBtn').disabled = true;
+    }
+  } catch (e) { myBooking = null; localStorage.removeItem('booking'); $('done').classList.add('hide'); }
+}
+async function cancelBooking() {
+  await post(`/api/booking/${myBooking.id}/cancel`, { token: myBooking.token });
+  myBooking = null; localStorage.removeItem('booking'); showBooking(); loadBays();
+}
+
+// ----- management -----
+async function login() {
+  $('lErr').textContent = '';
+  try { tok = (await post('/api/admin/login', { username: $('u').value, password: $('p').value })).token; sessionStorage.setItem('tok', tok); $('p').value = ''; show('adm'); }
+  catch (e) { $('lErr').textContent = e.message; }
+}
+function logout() { tok = null; sessionStorage.removeItem('tok'); show('menu'); }
+async function loadAdmin() {
+  try {
+    const d = await api('/api/admin/state', {}, tok);
+    $('aStatus').textContent = d.open ? 'OPEN FOR BOOKINGS' : 'BLOCKED BY ADMIN';
+    $('aStatus').style.color = d.open ? '#34d399' : '#fca5a5';
+    $('aToggle').textContent = d.open ? 'Close system to block bookings' : 'Open system for bookings';
+    $('aToggle').className = d.open ? 'red' : 'green'; $('aToggle').dataset.open = d.open ? '1' : '';
+    if (document.activeElement !== $('rate')) $('rate').value = d.rate;
+    $('rev').textContent = 'Total revenue (completed sessions): ' + money(d.revenue);
+    $('rows').innerHTML = d.bookings.map(b => `<tr><td>${b.bay}</td><td>${esc(b.name)}</td><td>${esc(b.email)}</td><td>${esc(b.plate)}</td><td>${b.status}</td><td>${b.fee != null ? money(b.fee) : '-'}</td></tr>`).join('') || '<tr><td colspan="6">No bookings yet.</td></tr>';
+  } catch (e) { logout(); }
+}
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+async function toggleOpen() { await post('/api/admin/booking-open', { open: !$('aToggle').dataset.open }, tok); loadAdmin(); }
+async function setRate() { try { await post('/api/admin/rate', { rate: $('rate').value }, tok); loadAdmin(); } catch (e) { alert(e.message); } }
+async function openGate(g) { await post('/api/admin/gate', { gate: g }, tok); $('gMsg').textContent = 'The ' + g + ' gate will open within a few seconds.'; setTimeout(() => $('gMsg').textContent = '', 5000); }
+async function exportCsv() {
+  const csv = await api('/api/admin/export', {}, tok);
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = 'parking_bookings.csv'; a.click();
+}
+</script>
+</body>
+</html>
