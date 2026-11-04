@@ -121,8 +121,13 @@ const dev = (req, res, next) =>
 app.post('/api/device/sync', dev, (req, res) => {
   expire();
   const occ = (req.body.bays || []).slice(0, 4);
+  // bays that currently have a booking (PIN not yet used, or car inside)
+  const held = db.prepare("SELECT bay FROM bookings WHERE status IN ('active','used')")
+    .all().map(r => r.bay);
+  // the sensor only counts when the bay is booked
   occ.forEach((o, i) =>
-    db.prepare('UPDATE bays SET occupied=?, updated=? WHERE id=?').run(o ? 1 : 0, Date.now(), i + 1));
+    db.prepare('UPDATE bays SET occupied=?, updated=? WHERE id=?')
+      .run(o && held.includes(i + 1) ? 1 : 0, Date.now(), i + 1));
   const gate = setting('gate_cmd');
   if (gate) setSetting('gate_cmd', '');
   res.json({ gate, free: bayList().filter(b => b.free).length });
