@@ -10,6 +10,12 @@ const MAX_STAY_HOURS = 24; // a car that entered but never exited is closed afte
 const BOOKINGS_PER_10_MIN = 30; // per-IP booking limit (was 5)
 const PIN_DIGITS = '01234568'; // digits used in PINs (7 and 9 left out: they misread on the keypad)
 
+// ESP32 heartbeat: every sync from the device updates lastSeen.
+// If no sync arrives for ONLINE_MS, the device counts as offline.
+let lastSeen = 0;
+const ONLINE_MS = 10000; // the ESP32 syncs every 3 s, so 10 s allows for one slow request
+const isOnline = () => Date.now() - lastSeen < ONLINE_MS;
+
 const dbPath = process.env.DB_PATH || path.join(__dirname, 'data', 'parking.db');
 fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 const db = new Database(dbPath);
@@ -36,8 +42,11 @@ const feeFor = (start, end, rate) => Math.max(1, Math.ceil((end - start) / 3.6e6
 
 function bayList() {
   const held = db.prepare("SELECT bay FROM bookings WHERE status IN ('active','used')").all().map(r => r.bay);
-  return db.prepare('SELECT id, occupied FROM bays ORDER BY id').all()
-    .map(b => ({ id: b.id, free: !b.occupied && !held.includes(b.id) }));
+  // occupied = the IR sensor sees a car (booked or not); reserved = booked but no car detected yet
+  return db.prepare('SELECT id, occupied FROM bays ORDER BY id').all().map(b => {
+    const status = b.occupied ? 'occupied' : held.includes(b.id) ? 'reserved' : 'free';
+    return { id: b.id, status, free: status === 'free' };
+  });
 }
 
 async function sendPin(to, name, bay, pin) {
@@ -68,12 +77,15 @@ const limit = (req, res, next) => {
 // ---------- customer ----------
 app.get('/api/bays', (req, res) => {
   expire();
-  res.json({ open: setting('booking_open') === '1', rate: +setting('rate'), bays: bayList() });
+  // "online" is false when the ESP32 has not synced for ONLINE_MS: the page must not show live bays then
+  res.json({ online: isOnline(), open: setting('booking_open') === '1', rate: +setting('rate'), bays: bayList() });
 });
 
 app.post('/api/book', limit, async (req, res) => {
   expire();
   if (setting('booking_open') !== '1') return res.status(403).json({ error: 'Booking is closed by management.' });
+  // no PIN can be used (keypad / gates) while the device is offline, so do not sell bookings
+  if (!isOnline()) return res.status(503).json({ error: 'Parking system is offline. Try again later.' });
   const { bay, name, email, phone, plate } = req.body || {};
   const n = String(name || '').trim(), e = String(email || '').trim().toLowerCase();
   const p = String(phone || '').replace(/[\s-]/g, ''), pl = String(plate || '').trim().toUpperCase();
@@ -121,21 +133,21 @@ const dev = (req, res, next) =>
   DEVICE_KEY && req.get('x-device-key') === DEVICE_KEY ? next() : res.status(401).json({ error: 'bad key' });
 
 app.post('/api/device/sync', dev, (req, res) => {
+  lastSeen = Date.now();   // heartbeat: the ESP32 is connected and sending
   expire();
+  // 4 true/false values from the IR sensors (true = something detected in the bay)
   const occ = (req.body.bays || []).slice(0, 4);
-  // bays that currently have a booking (PIN not yet used, or car inside)
-  const held = db.prepare("SELECT bay FROM bookings WHERE status IN ('active','used')")
-    .all().map(r => r.bay);
-  // the sensor only counts when the bay is booked
+  // the sensor always counts, even when nobody booked the bay
   occ.forEach((o, i) =>
     db.prepare('UPDATE bays SET occupied=?, updated=? WHERE id=?')
-      .run(o && held.includes(i + 1) ? 1 : 0, Date.now(), i + 1));
+      .run(o ? 1 : 0, Date.now(), i + 1));
   const gate = setting('gate_cmd');
   if (gate) setSetting('gate_cmd', '');
   res.json({ gate, free: bayList().filter(b => b.free).length });
 });
 
 app.post('/api/device/verify', dev, (req, res) => {
+  lastSeen = Date.now();   // a PIN check also proves the device is alive
   expire();
   const pin = String((req.body || {}).pin || '');
   const b = db.prepare("SELECT * FROM bookings WHERE pin_hash=? AND status IN ('active','used')").get(sha(pin));
@@ -164,7 +176,7 @@ app.get('/api/admin/state', admin, (req, res) => {
   const rows = db.prepare(`SELECT id,bay,name,email,phone,plate,status,created_at,entered_at,ended_at,fee
     FROM bookings ORDER BY id DESC LIMIT 200`).all();
   const revenue = rows.reduce((s, r) => s + (r.fee || 0), 0);
-  res.json({ open: setting('booking_open') === '1', rate: +setting('rate'), revenue, bookings: rows });
+  res.json({ online: isOnline(), open: setting('booking_open') === '1', rate: +setting('rate'), revenue, bookings: rows });
 });
 app.post('/api/admin/booking-open', admin, (req, res) => { setSetting('booking_open', req.body.open ? 1 : 0); res.json({ ok: true }); });
 app.post('/api/admin/rate', admin, (req, res) => {
